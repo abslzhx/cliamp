@@ -1,6 +1,6 @@
 # NetEase Cloud Music Integration
 
-Enable NetEase Cloud Music to browse account playlists, saved playlists, liked songs, daily recommendations, personal radar, and public charts. Playback uses `yt-dlp`. Put `yt-dlp` and `ffmpeg` on `PATH`.
+Enable NetEase Cloud Music to browse account playlists, saved playlists, liked songs, daily recommendations, personal radar, personal roaming, and public charts. Playback uses `yt-dlp`. Put `yt-dlp` and `ffmpeg` on `PATH`.
 
 ## Quick Start
 
@@ -28,11 +28,14 @@ cliamp stores only the browser name and user id. It does not store your password
 enabled = true
 cookies_from = "chrome"
 user_id = "78819429"
+roam_count = 15
 ```
 
 cliamp passes `cookies_from` to `yt-dlp --cookies-from-browser`. Supported names depend on the installed `yt-dlp` version. Common names include `chrome`, `chromium`, `firefox`, `brave`, `edge`, `opera`, `safari`, and `vivaldi`. The setup wizard lists common browsers. Use **Custom browser/profile** only for a profile value such as `chrome:Profile 1` or `firefox:default-release`.
 
 `user_id` is optional with valid cookies. If you omit it, cliamp gets it from the signed-in account.
+
+`roam_count` is optional (default 15). It controls the target number of tracks fetched for **Personal Roaming** (up to 100).
 
 ## Usage
 
@@ -49,9 +52,9 @@ Inside the TUI:
 | `M` | Open NetEase provider |
 | `Ctrl+F` | Search NetEase songs while NetEase is active |
 | `Enter` | Load the highlighted playlist or play the highlighted track |
-| `Ctrl+R` | Refresh playlists, or reload daily recommendations / personal radar in place |
+| `Ctrl+R` | Refresh playlists, or reload daily recommendations / personal radar / personal roaming in place |
 
-When signed in, NetEase includes a **Discover** section with **Daily Recommendation** and **Personal Radar**.
+When signed in, NetEase includes a **Discover** section with **Daily Recommendation**, **Personal Radar**, and **Personal Roaming**.
 
 You can also use direct NetEase URLs:
 

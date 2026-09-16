@@ -247,6 +247,7 @@ eq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 # enabled = true
 # cookies_from = "chrome"
 # user_id = "optional-account-user-id"
+# roam_count = 15 # number of tracks to fetch for personal roaming (default 15)
 
 # ---
 # Yandex Music (optional, opt-in)

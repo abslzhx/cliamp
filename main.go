@@ -219,6 +219,7 @@ func run(overrides config.Overrides, positional []string, daemon, visualizer60FP
 		Enabled:     cfg.NetEase.Enabled,
 		CookiesFrom: cfg.NetEase.CookiesFrom,
 		UserID:      cfg.NetEase.UserID,
+		RoamCount:   cfg.NetEase.RoamCount,
 	}); neProv != nil {
 		providers = append(providers, model.ProviderEntry{Key: "netease", Name: "NetEase", Provider: neProv})
 	}

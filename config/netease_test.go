@@ -8,13 +8,14 @@ import (
 
 func TestLoadNetEase(t *testing.T) {
 	tests := []struct {
-		name        string
-		env         map[string]string
-		tomlContent string
-		wantEnabled bool
-		wantIsSet   bool
-		wantCookies string
-		wantUserID  string
+		name          string
+		env           map[string]string
+		tomlContent   string
+		wantEnabled   bool
+		wantIsSet     bool
+		wantCookies   string
+		wantUserID    string
+		wantRoamCount int
 	}{
 		{
 			name: "disabled by default",
@@ -25,11 +26,13 @@ func TestLoadNetEase(t *testing.T) {
 enabled = true
 cookies_from = "chrome"
 user_id = "42"
+roam_count = 30
 `,
-			wantEnabled: true,
-			wantIsSet:   true,
-			wantCookies: "chrome",
-			wantUserID:  "42",
+			wantEnabled:   true,
+			wantIsSet:     true,
+			wantCookies:   "chrome",
+			wantUserID:    "42",
+			wantRoamCount: 30,
 		},
 		{
 			name: "cookies_from interpolated from env",
@@ -77,6 +80,9 @@ cookies_from = "$NETEASE_BROWSER"
 			}
 			if cfg.NetEase.UserID != tc.wantUserID {
 				t.Errorf("UserID = %q, want %q", cfg.NetEase.UserID, tc.wantUserID)
+			}
+			if cfg.NetEase.RoamCount != tc.wantRoamCount {
+				t.Errorf("RoamCount = %d, want %d", cfg.NetEase.RoamCount, tc.wantRoamCount)
 			}
 		})
 	}

@@ -263,6 +263,7 @@ type NetEaseConfig struct {
 	Enabled     bool   // true only when user explicitly sets enabled = true
 	CookiesFrom string // browser name for account APIs and playback (e.g. "chrome")
 	UserID      string // optional account user id; setup can discover this from cookies
+	RoamCount   int    // target number of tracks to fetch for personal roaming (default 15)
 }
 
 // IsSet reports whether the NetEase provider should be shown.
@@ -622,6 +623,10 @@ func Load() (Config, error) {
 				cfg.NetEase.CookiesFrom = strings.TrimSpace(parseString(val))
 			case "user_id":
 				cfg.NetEase.UserID = parseString(val)
+			case "roam_count", "roam_tracks":
+				if v, err := strconv.Atoi(val); err == nil && v > 0 {
+					cfg.NetEase.RoamCount = v
+				}
 			}
 		case "yandex":
 			switch key {

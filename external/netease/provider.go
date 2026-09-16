@@ -40,6 +40,9 @@ const (
 	dailyRecommendPlaylistID = "recommend:daily"
 	personalRadarPlaylistID  = "radar:personal"
 	radarSystemPlaylistID    = "3136952023"
+	personalRoamPlaylistID   = "roam:personal"
+	defaultRoamTracks        = 15
+	maxRoamTracks            = 100
 )
 
 // ErrNotAuthenticated is returned when browser cookies do not contain a
@@ -51,6 +54,7 @@ type Config struct {
 	Enabled     bool
 	CookiesFrom string
 	UserID      string
+	RoamCount   int
 }
 
 // IsSet reports whether the provider should be exposed.
@@ -81,11 +85,13 @@ type Provider struct {
 	httpClient  *http.Client
 	cookiesFrom string
 	userID      string
+	roamCount   int
 
 	mu           sync.Mutex
 	cookieHeader string
 	playlists    []playlist.PlaylistInfo
 	account      *Account
+	roamTracks   []playlist.Track
 }
 
 // NewFromConfig returns a provider, or nil when NetEase is not enabled.
@@ -102,11 +108,18 @@ func NewFromConfig(cfg Config) *Provider {
 
 // New creates a NetEase provider.
 func New(cfg Config) *Provider {
+	roamCount := cfg.RoamCount
+	if roamCount <= 0 {
+		roamCount = defaultRoamTracks
+	} else if roamCount > maxRoamTracks {
+		roamCount = maxRoamTracks
+	}
 	return &Provider{
 		apiBase:     defaultAPIBase,
 		httpClient:  &http.Client{Timeout: apiTimeout},
 		cookiesFrom: strings.TrimSpace(cfg.CookiesFrom),
 		userID:      strings.TrimSpace(cfg.UserID),
+		roamCount:   roamCount,
 	}
 }
 
@@ -118,19 +131,20 @@ func newWithBase(cfg Config, base string) *Provider {
 
 func (p *Provider) Name() string { return "NetEase Cloud Music" }
 
-// Refresh clears cached account and playlist state.
+// Refresh clears cached account, playlist, and personal roaming state.
 func (p *Provider) Refresh() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.cookieHeader = ""
 	p.playlists = nil
 	p.account = nil
+	p.roamTracks = nil
 }
 
-// CanRefreshPlaylist implements playlist.RefreshablePlaylist: daily recommendations
-// and personal radar can be reloaded in place (ctrl+r).
+// CanRefreshPlaylist implements playlist.RefreshablePlaylist: daily recommendations,
+// personal radar, and personal roaming can be reloaded in place (ctrl+r).
 func (p *Provider) CanRefreshPlaylist(id string) bool {
-	return id == dailyRecommendPlaylistID || id == personalRadarPlaylistID
+	return id == dailyRecommendPlaylistID || id == personalRadarPlaylistID || id == personalRoamPlaylistID
 }
 
 // CheckLogin verifies that the given browser has a signed-in NetEase account.
@@ -212,6 +226,11 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 				Name:    "Personal Radar",
 				Section: "Discover",
 			},
+			playlist.PlaylistInfo{
+				ID:      personalRoamPlaylistID,
+				Name:    "Personal Roaming",
+				Section: "Discover",
+			},
 		)
 		userLists, err := p.userPlaylists(ctx, userID)
 		if err != nil {
@@ -227,7 +246,7 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 	return infos, nil
 }
 
-// Tracks returns tracks for a user playlist, chart, daily recommendation, or personal radar.
+// Tracks returns tracks for a user playlist, chart, daily recommendation, personal radar, or personal roaming.
 func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 	playlistID = strings.TrimSpace(playlistID)
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
@@ -238,6 +257,8 @@ func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 		return p.dailyRecommendTracks(ctx)
 	case personalRadarPlaylistID:
 		return p.playlistTracksByID(ctx, radarSystemPlaylistID)
+	case personalRoamPlaylistID:
+		return p.personalRoamTracks(ctx)
 	}
 
 	id, err := cleanPlaylistID(playlistID)
@@ -245,6 +266,67 @@ func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 		return nil, err
 	}
 	return p.playlistTracksByID(ctx, id)
+}
+
+func (p *Provider) personalRoamTracks(ctx context.Context) ([]playlist.Track, error) {
+	p.mu.Lock()
+	if len(p.roamTracks) > 0 {
+		out := append([]playlist.Track(nil), p.roamTracks...)
+		p.mu.Unlock()
+		return out, nil
+	}
+	p.mu.Unlock()
+
+	target := p.roamCount
+	if target <= 0 {
+		target = defaultRoamTracks
+	}
+	maxBatches := target * 2
+	if maxBatches < 5 {
+		maxBatches = 5
+	} else if maxBatches > 50 {
+		maxBatches = 50
+	}
+
+	var allSongs []song
+	seen := make(map[int64]bool)
+	for batch := 0; batch < maxBatches && len(allSongs) < target; batch++ {
+		var resp radioResponse
+		if err := p.apiGet(ctx, "/api/v1/radio/get", nil, &resp); err != nil {
+			if len(allSongs) > 0 {
+				break
+			}
+			return nil, err
+		}
+		if resp.Code != neteaseCodeOK {
+			if len(allSongs) > 0 {
+				break
+			}
+			return nil, fmt.Errorf("netease: personal roam failed with code %d", resp.Code)
+		}
+		if len(resp.Data) == 0 {
+			break
+		}
+		addedAny := false
+		for _, s := range resp.Data {
+			if s.ID != 0 && !seen[s.ID] {
+				seen[s.ID] = true
+				allSongs = append(allSongs, s)
+				addedAny = true
+				if len(allSongs) >= target {
+					break
+				}
+			}
+		}
+		if !addedAny {
+			break
+		}
+	}
+	tracks := songsToTracks(allSongs)
+	p.mu.Lock()
+	p.roamTracks = append([]playlist.Track(nil), tracks...)
+	p.mu.Unlock()
+	return tracks, nil
 }
 
 func (p *Provider) playlistTracksByID(ctx context.Context, id string) ([]playlist.Track, error) {
@@ -681,4 +763,9 @@ func dailySongsToTracks(dailySongs []dailySong) []playlist.Track {
 		songs = append(songs, d.toSong())
 	}
 	return songsToTracks(songs)
+}
+
+type radioResponse struct {
+	Code int    `json:"code"`
+	Data []song `json:"data"`
 }

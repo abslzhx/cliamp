@@ -32,8 +32,8 @@ func TestPlaylistsIncludesAccountListsAndCharts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Playlists() error = %v", err)
 	}
-	if len(lists) != 9 {
-		t.Fatalf("got %d playlists, want 9", len(lists))
+	if len(lists) != 10 {
+		t.Fatalf("got %d playlists, want 10", len(lists))
 	}
 	if lists[0].ID != "recommend:daily" || lists[0].Name != "Daily Recommendation" || lists[0].Section != "Discover" {
 		t.Fatalf("daily recommendation playlist = %+v", lists[0])
@@ -41,14 +41,17 @@ func TestPlaylistsIncludesAccountListsAndCharts(t *testing.T) {
 	if lists[1].ID != "radar:personal" || lists[1].Name != "Personal Radar" || lists[1].Section != "Discover" {
 		t.Fatalf("personal radar playlist = %+v", lists[1])
 	}
-	if lists[2].ID != "user:10" || lists[2].Name != "Liked Songs" || lists[2].Section != "My Playlists" {
-		t.Fatalf("liked playlist = %+v", lists[2])
+	if lists[2].ID != "roam:personal" || lists[2].Name != "Personal Roaming" || lists[2].Section != "Discover" {
+		t.Fatalf("personal roaming playlist = %+v", lists[2])
 	}
-	if lists[4].Section != "Saved Playlists" {
-		t.Fatalf("saved playlist section = %q", lists[4].Section)
+	if lists[3].ID != "user:10" || lists[3].Name != "Liked Songs" || lists[3].Section != "My Playlists" {
+		t.Fatalf("liked playlist = %+v", lists[3])
 	}
-	if lists[5].ID != "chart:3778678" || lists[5].Section != "Charts" {
-		t.Fatalf("first chart = %+v", lists[5])
+	if lists[5].Section != "Saved Playlists" {
+		t.Fatalf("saved playlist section = %q", lists[5].Section)
+	}
+	if lists[6].ID != "chart:3778678" || lists[6].Section != "Charts" {
+		t.Fatalf("first chart = %+v", lists[6])
 	}
 }
 
@@ -261,6 +264,67 @@ func TestTracksPersonalRadar(t *testing.T) {
 	}
 }
 
+func TestTracksPersonalRoaming(t *testing.T) {
+	var requestCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/radio/get" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		requestCount++
+		switch requestCount {
+		case 1:
+			w.Write([]byte(`{"code":200,"data":[
+				{"id":5001,"name":"Roam Track 1","duration":120000,"artists":[{"name":"Artist 1"}],"album":{"name":"Album 1"}},
+				{"id":5002,"name":"Roam Track 2","duration":130000,"artists":[{"name":"Artist 2"}],"album":{"name":"Album 2"}}
+			]}`))
+		case 2:
+			w.Write([]byte(`{"code":200,"data":[
+				{"id":5002,"name":"Roam Track 2 Duplicate","duration":130000,"artists":[{"name":"Artist 2"}],"album":{"name":"Album 2"}},
+				{"id":5003,"name":"Roam Track 3","duration":140000,"artists":[{"name":"Artist 3"}],"album":{"name":"Album 3"}}
+			]}`))
+		default:
+			w.Write([]byte(`{"code":200,"data":[]}`))
+		}
+	}))
+	defer srv.Close()
+
+	p := newWithBase(Config{Enabled: true}, srv.URL)
+	tracks, err := p.Tracks("roam:personal")
+	if err != nil {
+		t.Fatalf("Tracks(roam:personal) error = %v", err)
+	}
+	if len(tracks) != 3 {
+		t.Fatalf("got %d tracks, want 3", len(tracks))
+	}
+	if tracks[0].Title != "Roam Track 1" || tracks[1].Title != "Roam Track 2" || tracks[2].Title != "Roam Track 3" {
+		t.Fatalf("unexpected tracks = %+v", tracks)
+	}
+
+	countBefore := requestCount
+	tracks2, err := p.Tracks("roam:personal")
+	if err != nil {
+		t.Fatalf("Tracks(roam:personal) 2nd error = %v", err)
+	}
+	if len(tracks2) != 3 {
+		t.Fatalf("got %d tracks on second call, want 3", len(tracks2))
+	}
+	if requestCount != countBefore {
+		t.Fatalf("requestCount changed from %d to %d (expected cache hit)", countBefore, requestCount)
+	}
+
+	p.Refresh()
+	if len(p.roamTracks) != 0 {
+		t.Fatalf("p.roamTracks not cleared after Refresh()")
+	}
+	_, err = p.Tracks("roam:personal")
+	if err != nil {
+		t.Fatalf("Tracks(roam:personal) after Refresh() error = %v", err)
+	}
+	if requestCount <= countBefore {
+		t.Fatalf("expected requestCount to increase after Refresh(), got %d <= %d", requestCount, countBefore)
+	}
+}
+
 func TestCanRefreshPlaylist(t *testing.T) {
 	p := New(Config{Enabled: true})
 	if !p.CanRefreshPlaylist("recommend:daily") {
@@ -268,6 +332,9 @@ func TestCanRefreshPlaylist(t *testing.T) {
 	}
 	if !p.CanRefreshPlaylist("radar:personal") {
 		t.Error("CanRefreshPlaylist(radar:personal) = false, want true")
+	}
+	if !p.CanRefreshPlaylist("roam:personal") {
+		t.Error("CanRefreshPlaylist(roam:personal) = false, want true")
 	}
 	if p.CanRefreshPlaylist("radio:fm") {
 		t.Error("CanRefreshPlaylist(radio:fm) = true, want false")
@@ -277,5 +344,31 @@ func TestCanRefreshPlaylist(t *testing.T) {
 	}
 	if p.CanRefreshPlaylist("chart:3778678") {
 		t.Error("CanRefreshPlaylist(chart:3778678) = true, want false")
+	}
+}
+
+func TestTracksPersonalRoamingCustomCount(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/radio/get" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"code":200,"data":[
+			{"id":6001,"name":"Song 1","duration":100000,"artists":[{"name":"Artist 1"}],"album":{"name":"Album 1"}},
+			{"id":6002,"name":"Song 2","duration":100000,"artists":[{"name":"Artist 2"}],"album":{"name":"Album 2"}},
+			{"id":6003,"name":"Song 3","duration":100000,"artists":[{"name":"Artist 3"}],"album":{"name":"Album 3"}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	p := newWithBase(Config{Enabled: true, RoamCount: 2}, srv.URL)
+	tracks, err := p.Tracks("roam:personal")
+	if err != nil {
+		t.Fatalf("Tracks(roam:personal) error = %v", err)
+	}
+	if len(tracks) != 2 {
+		t.Fatalf("got %d tracks, want 2", len(tracks))
+	}
+	if tracks[0].Title != "Song 1" || tracks[1].Title != "Song 2" {
+		t.Fatalf("unexpected tracks = %+v", tracks)
 	}
 }
