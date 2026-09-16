@@ -1,6 +1,6 @@
 # NetEase Cloud Music Integration
 
-Enable NetEase Cloud Music to browse account playlists, saved playlists, liked songs, daily recommendations, and public charts. Playback uses `yt-dlp`. Put `yt-dlp` and `ffmpeg` on `PATH`.
+Enable NetEase Cloud Music to browse account playlists, saved playlists, liked songs, daily recommendations, personal radar, and public charts. Playback uses `yt-dlp`. Put `yt-dlp` and `ffmpeg` on `PATH`.
 
 ## Quick Start
 
@@ -49,9 +49,9 @@ Inside the TUI:
 | `M` | Open NetEase provider |
 | `Ctrl+F` | Search NetEase songs while NetEase is active |
 | `Enter` | Load the highlighted playlist or play the highlighted track |
-| `Ctrl+R` | Refresh playlists, or reload daily recommendations in place |
+| `Ctrl+R` | Refresh playlists, or reload daily recommendations / personal radar in place |
 
-When signed in, NetEase includes a **Discover** section with **Daily Recommendation**.
+When signed in, NetEase includes a **Discover** section with **Daily Recommendation** and **Personal Radar**.
 
 You can also use direct NetEase URLs:
 

@@ -32,20 +32,23 @@ func TestPlaylistsIncludesAccountListsAndCharts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Playlists() error = %v", err)
 	}
-	if len(lists) != 8 {
-		t.Fatalf("got %d playlists, want 8", len(lists))
+	if len(lists) != 9 {
+		t.Fatalf("got %d playlists, want 9", len(lists))
 	}
 	if lists[0].ID != "recommend:daily" || lists[0].Name != "Daily Recommendation" || lists[0].Section != "Discover" {
 		t.Fatalf("daily recommendation playlist = %+v", lists[0])
 	}
-	if lists[1].ID != "user:10" || lists[1].Name != "Liked Songs" || lists[1].Section != "My Playlists" {
-		t.Fatalf("liked playlist = %+v", lists[1])
+	if lists[1].ID != "radar:personal" || lists[1].Name != "Personal Radar" || lists[1].Section != "Discover" {
+		t.Fatalf("personal radar playlist = %+v", lists[1])
 	}
-	if lists[3].Section != "Saved Playlists" {
-		t.Fatalf("saved playlist section = %q", lists[3].Section)
+	if lists[2].ID != "user:10" || lists[2].Name != "Liked Songs" || lists[2].Section != "My Playlists" {
+		t.Fatalf("liked playlist = %+v", lists[2])
 	}
-	if lists[4].ID != "chart:3778678" || lists[4].Section != "Charts" {
-		t.Fatalf("first chart = %+v", lists[4])
+	if lists[4].Section != "Saved Playlists" {
+		t.Fatalf("saved playlist section = %q", lists[4].Section)
+	}
+	if lists[5].ID != "chart:3778678" || lists[5].Section != "Charts" {
+		t.Fatalf("first chart = %+v", lists[5])
 	}
 }
 
@@ -229,10 +232,42 @@ func TestTracksDailyRecommendationFallback(t *testing.T) {
 	}
 }
 
+func TestTracksPersonalRadar(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/playlist/detail" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("id"); got != "3136952023" {
+			t.Fatalf("id = %q, want 3136952023", got)
+		}
+		w.Write([]byte(`{"code":200,"result":{"tracks":[
+			{"id":3001,"name":"Radar Track","duration":180000,"no":1,
+			 "artists":[{"name":"Radar Artist"}],
+			 "album":{"name":"Radar Album"}}
+		]}}`))
+	}))
+	defer srv.Close()
+
+	p := newWithBase(Config{Enabled: true}, srv.URL)
+	tracks, err := p.Tracks("radar:personal")
+	if err != nil {
+		t.Fatalf("Tracks(radar:personal) error = %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(tracks))
+	}
+	if tracks[0].Title != "Radar Track" || tracks[0].Artist != "Radar Artist" {
+		t.Fatalf("unexpected tracks = %+v", tracks)
+	}
+}
+
 func TestCanRefreshPlaylist(t *testing.T) {
 	p := New(Config{Enabled: true})
 	if !p.CanRefreshPlaylist("recommend:daily") {
 		t.Error("CanRefreshPlaylist(recommend:daily) = false, want true")
+	}
+	if !p.CanRefreshPlaylist("radar:personal") {
+		t.Error("CanRefreshPlaylist(radar:personal) = false, want true")
 	}
 	if p.CanRefreshPlaylist("radio:fm") {
 		t.Error("CanRefreshPlaylist(radio:fm) = true, want false")

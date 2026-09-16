@@ -38,6 +38,8 @@ const (
 	neteaseCodeOK = 200
 
 	dailyRecommendPlaylistID = "recommend:daily"
+	personalRadarPlaylistID  = "radar:personal"
+	radarSystemPlaylistID    = "3136952023"
 )
 
 // ErrNotAuthenticated is returned when browser cookies do not contain a
@@ -126,9 +128,9 @@ func (p *Provider) Refresh() {
 }
 
 // CanRefreshPlaylist implements playlist.RefreshablePlaylist: daily recommendations
-// can be reloaded in place (ctrl+r).
+// and personal radar can be reloaded in place (ctrl+r).
 func (p *Provider) CanRefreshPlaylist(id string) bool {
-	return id == dailyRecommendPlaylistID
+	return id == dailyRecommendPlaylistID || id == personalRadarPlaylistID
 }
 
 // CheckLogin verifies that the given browser has a signed-in NetEase account.
@@ -205,6 +207,11 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 				Name:    "Daily Recommendation",
 				Section: "Discover",
 			},
+			playlist.PlaylistInfo{
+				ID:      personalRadarPlaylistID,
+				Name:    "Personal Radar",
+				Section: "Discover",
+			},
 		)
 		userLists, err := p.userPlaylists(ctx, userID)
 		if err != nil {
@@ -220,20 +227,27 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 	return infos, nil
 }
 
-// Tracks returns tracks for a user playlist, chart, or daily recommendation.
+// Tracks returns tracks for a user playlist, chart, daily recommendation, or personal radar.
 func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 	playlistID = strings.TrimSpace(playlistID)
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
-	if playlistID == dailyRecommendPlaylistID {
+	switch playlistID {
+	case dailyRecommendPlaylistID:
 		return p.dailyRecommendTracks(ctx)
+	case personalRadarPlaylistID:
+		return p.playlistTracksByID(ctx, radarSystemPlaylistID)
 	}
 
 	id, err := cleanPlaylistID(playlistID)
 	if err != nil {
 		return nil, err
 	}
+	return p.playlistTracksByID(ctx, id)
+}
+
+func (p *Provider) playlistTracksByID(ctx context.Context, id string) ([]playlist.Track, error) {
 	params := url.Values{"id": {id}}
 	var resp playlistDetailResponse
 	if err := p.apiGet(ctx, "/api/playlist/detail", params, &resp); err != nil {
