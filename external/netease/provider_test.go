@@ -32,17 +32,20 @@ func TestPlaylistsIncludesAccountListsAndCharts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Playlists() error = %v", err)
 	}
-	if len(lists) != 7 {
-		t.Fatalf("got %d playlists, want 7", len(lists))
+	if len(lists) != 8 {
+		t.Fatalf("got %d playlists, want 8", len(lists))
 	}
-	if lists[0].ID != "user:10" || lists[0].Name != "Liked Songs" || lists[0].Section != "My Playlists" {
-		t.Fatalf("liked playlist = %+v", lists[0])
+	if lists[0].ID != "recommend:daily" || lists[0].Name != "Daily Recommendation" || lists[0].Section != "Discover" {
+		t.Fatalf("daily recommendation playlist = %+v", lists[0])
 	}
-	if lists[2].Section != "Saved Playlists" {
-		t.Fatalf("saved playlist section = %q", lists[2].Section)
+	if lists[1].ID != "user:10" || lists[1].Name != "Liked Songs" || lists[1].Section != "My Playlists" {
+		t.Fatalf("liked playlist = %+v", lists[1])
 	}
-	if lists[3].ID != "chart:3778678" || lists[3].Section != "Charts" {
-		t.Fatalf("first chart = %+v", lists[3])
+	if lists[3].Section != "Saved Playlists" {
+		t.Fatalf("saved playlist section = %q", lists[3].Section)
+	}
+	if lists[4].ID != "chart:3778678" || lists[4].Section != "Charts" {
+		t.Fatalf("first chart = %+v", lists[4])
 	}
 }
 
@@ -165,4 +168,79 @@ func TestLiveCheckLoginWithBrowser(t *testing.T) {
 
 func osWriteFile(path, data string) error {
 	return os.WriteFile(path, []byte(data), 0o644)
+}
+
+func TestTracksDailyRecommendation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/discovery/recommend/songs" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"code":200,"data":{"dailySongs":[
+			{"id":1001,"name":"Daily Song One","dt":200000,"no":1,
+			 "ar":[{"name":"Artist A"},{"name":"Artist B"}],
+			 "al":{"name":"Album Alpha"}}
+		]}}`))
+	}))
+	defer srv.Close()
+
+	p := newWithBase(Config{Enabled: true}, srv.URL)
+	tracks, err := p.Tracks("recommend:daily")
+	if err != nil {
+		t.Fatalf("Tracks(recommend:daily) error = %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("got %d tracks, want 1", len(tracks))
+	}
+	tr := tracks[0]
+	if tr.Path != "https://music.163.com/#/song?id=1001" {
+		t.Fatalf("Path = %q", tr.Path)
+	}
+	if tr.Title != "Daily Song One" || tr.Artist != "Artist A, Artist B" || tr.Album != "Album Alpha" {
+		t.Fatalf("metadata mismatch: title %q artist %q album %q", tr.Title, tr.Artist, tr.Album)
+	}
+	if tr.DurationSecs != 200 {
+		t.Fatalf("DurationSecs = %d, want 200", tr.DurationSecs)
+	}
+	if tr.Meta(provider.MetaNetEaseID) != "1001" {
+		t.Fatalf("MetaNetEaseID = %q, want 1001", tr.Meta(provider.MetaNetEaseID))
+	}
+}
+
+func TestTracksDailyRecommendationFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/discovery/recommend/songs" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"code":200,"recommend":[
+			{"id":1002,"name":"Fallback Song","duration":180000,"no":2,
+			 "artists":[{"name":"Artist C"}],
+			 "album":{"name":"Album Beta"}}
+		]}}`))
+	}))
+	defer srv.Close()
+
+	p := newWithBase(Config{Enabled: true}, srv.URL)
+	tracks, err := p.Tracks("recommend:daily")
+	if err != nil {
+		t.Fatalf("Tracks(recommend:daily) error = %v", err)
+	}
+	if len(tracks) != 1 || tracks[0].Title != "Fallback Song" {
+		t.Fatalf("unexpected tracks = %+v", tracks)
+	}
+}
+
+func TestCanRefreshPlaylist(t *testing.T) {
+	p := New(Config{Enabled: true})
+	if !p.CanRefreshPlaylist("recommend:daily") {
+		t.Error("CanRefreshPlaylist(recommend:daily) = false, want true")
+	}
+	if p.CanRefreshPlaylist("radio:fm") {
+		t.Error("CanRefreshPlaylist(radio:fm) = true, want false")
+	}
+	if p.CanRefreshPlaylist("user:123") {
+		t.Error("CanRefreshPlaylist(user:123) = true, want false")
+	}
+	if p.CanRefreshPlaylist("chart:3778678") {
+		t.Error("CanRefreshPlaylist(chart:3778678) = true, want false")
+	}
 }

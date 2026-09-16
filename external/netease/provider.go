@@ -23,8 +23,9 @@ import (
 )
 
 var (
-	_ playlist.Provider = (*Provider)(nil)
-	_ provider.Searcher = (*Provider)(nil)
+	_ playlist.Provider            = (*Provider)(nil)
+	_ playlist.RefreshablePlaylist = (*Provider)(nil)
+	_ provider.Searcher            = (*Provider)(nil)
 )
 
 const (
@@ -35,6 +36,8 @@ const (
 	// responses. It happens to share the value of HTTP 200 but is a distinct
 	// field, so it gets its own constant rather than comparing to http.StatusOK.
 	neteaseCodeOK = 200
+
+	dailyRecommendPlaylistID = "recommend:daily"
 )
 
 // ErrNotAuthenticated is returned when browser cookies do not contain a
@@ -70,7 +73,7 @@ var charts = []chartPlaylist{
 	{id: "2884035", name: "Original Songs"},
 }
 
-// Provider implements playlist.Provider and provider.Searcher.
+// Provider implements playlist.Provider, playlist.RefreshablePlaylist, and provider.Searcher.
 type Provider struct {
 	apiBase     string
 	httpClient  *http.Client
@@ -122,6 +125,12 @@ func (p *Provider) Refresh() {
 	p.account = nil
 }
 
+// CanRefreshPlaylist implements playlist.RefreshablePlaylist: daily recommendations
+// can be reloaded in place (ctrl+r).
+func (p *Provider) CanRefreshPlaylist(id string) bool {
+	return id == dailyRecommendPlaylistID
+}
+
 // CheckLogin verifies that the given browser has a signed-in NetEase account.
 func CheckLogin(ctx context.Context, browser string) (Account, error) {
 	p := New(Config{Enabled: true, CookiesFrom: browser})
@@ -167,7 +176,7 @@ func (p *Provider) Account(ctx context.Context) (Account, error) {
 	return acc, nil
 }
 
-// Playlists returns account playlists followed by public chart playlists.
+// Playlists returns recommendations, account playlists, and public chart playlists.
 func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 	p.mu.Lock()
 	if p.playlists != nil {
@@ -190,6 +199,13 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 		userID = acc.UserID
 	}
 	if userID != "" {
+		infos = append(infos,
+			playlist.PlaylistInfo{
+				ID:      dailyRecommendPlaylistID,
+				Name:    "Daily Recommendation",
+				Section: "Discover",
+			},
+		)
 		userLists, err := p.userPlaylists(ctx, userID)
 		if err != nil {
 			return nil, err
@@ -204,15 +220,20 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 	return infos, nil
 }
 
-// Tracks returns tracks for a user playlist or built-in chart playlist.
+// Tracks returns tracks for a user playlist, chart, or daily recommendation.
 func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
+	playlistID = strings.TrimSpace(playlistID)
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+
+	if playlistID == dailyRecommendPlaylistID {
+		return p.dailyRecommendTracks(ctx)
+	}
+
 	id, err := cleanPlaylistID(playlistID)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
-	defer cancel()
-
 	params := url.Values{"id": {id}}
 	var resp playlistDetailResponse
 	if err := p.apiGet(ctx, "/api/playlist/detail", params, &resp); err != nil {
@@ -222,6 +243,23 @@ func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 		return nil, fmt.Errorf("netease: playlist detail failed with code %d", resp.Code)
 	}
 	return songsToTracks(resp.Result.Tracks), nil
+}
+
+func (p *Provider) dailyRecommendTracks(ctx context.Context) ([]playlist.Track, error) {
+	var resp dailySongsResponse
+	if err := p.apiGet(ctx, "/api/v3/discovery/recommend/songs", nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Code != neteaseCodeOK {
+		return nil, fmt.Errorf("netease: daily songs failed with code %d", resp.Code)
+	}
+	if len(resp.Data.DailySongs) > 0 {
+		return dailySongsToTracks(resp.Data.DailySongs), nil
+	}
+	if len(resp.Recommend) > 0 {
+		return songsToTracks(resp.Recommend), nil
+	}
+	return []playlist.Track{}, nil
 }
 
 // SearchTracks searches NetEase songs.
@@ -593,4 +631,40 @@ type artist struct {
 
 type album struct {
 	Name string `json:"name"`
+}
+
+type dailySongsResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		DailySongs []dailySong `json:"dailySongs"`
+	} `json:"data"`
+	Recommend []song `json:"recommend"`
+}
+
+type dailySong struct {
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	DurationMS  int      `json:"dt"`
+	TrackNumber int      `json:"no"`
+	Artists     []artist `json:"ar"`
+	Album       album    `json:"al"`
+}
+
+func (d dailySong) toSong() song {
+	return song{
+		ID:          d.ID,
+		Name:        d.Name,
+		DurationMS:  d.DurationMS,
+		TrackNumber: d.TrackNumber,
+		Artists:     d.Artists,
+		Album:       d.Album,
+	}
+}
+
+func dailySongsToTracks(dailySongs []dailySong) []playlist.Track {
+	songs := make([]song, 0, len(dailySongs))
+	for _, d := range dailySongs {
+		songs = append(songs, d.toSong())
+	}
+	return songsToTracks(songs)
 }
